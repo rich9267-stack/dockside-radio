@@ -81,6 +81,22 @@
   ol li { overflow-wrap: anywhere; }
   ol li span { color: var(--muted); }
   h2 { font: 700 .85rem var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  /* Dock mode: black screen, only the (required) video window and dim song info, touches blocked */
+  .dockinfo { display: none; }
+  body.dock { background: #000; }
+  body.dock header, body.dock #setup, body.dock #logBox { display: none !important; }
+  body.dock #station { background: #000; border-color: transparent; padding: 0; gap: 14px; }
+  body.dock #station > :not(.video):not(.dockinfo) { display: none !important; }
+  body.dock .video { border-radius: 0; }
+  body.dock .video iframe { pointer-events: none; }
+  body.dock .dockinfo { display: grid; gap: 6px; color: #56676a; text-align: center; }
+  .dockinfo .ds { font: 700 1rem/1.2 var(--display); letter-spacing: .04em; text-transform: uppercase; overflow-wrap: anywhere; }
+  .dockinfo .da { font-size: .85rem; overflow-wrap: anywhere; }
+  .dockinfo .dh { font: 500 .75rem var(--display); letter-spacing: .12em; text-transform: uppercase; color: #3b494b; margin-top: 18px; }
+  .dockinfo .dh.holding { color: var(--accent); }
+  body.dock main { min-height: 100%; align-content: center; }
+  html:has(body.dock), body.dock { height: 100%; }
+  #shield { position: fixed; inset: 0; z-index: 50; background: transparent; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -88,7 +104,7 @@
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V3.0 · AI DJ</span>
+    <span class="freq">V4.0 · DOCK MODE</span>
   </header>
 
   <section class="panel" id="setup">
@@ -110,6 +126,11 @@
     </div>
     <p class="said" id="said" hidden></p>
     <div class="video"><div id="player"></div></div>
+    <div class="dockinfo" aria-live="polite">
+      <span class="ds" id="dockSong"></span>
+      <span class="da" id="dockArtist"></span>
+      <span class="dh" id="dockHint">Locked · press and hold 2 seconds to unlock</span>
+    </div>
     <div class="row">
       <button class="ghost" id="prev">Back</button>
       <button id="toggle">Pause</button>
@@ -119,6 +140,7 @@
       <button class="ghost" id="dj" aria-pressed="true">DJ: On</button>
       <button class="ghost" id="change">Stations</button>
     </div>
+    <button class="ghost" id="dock">Dock mode: black screen + touch lock</button>
   </section>
 
   <section class="panel" id="logBox" hidden>
@@ -126,6 +148,7 @@
     <ol id="log"></ol>
   </section>
 </main>
+<div id="shield" hidden></div>
 
 <script>
 (function () {
@@ -412,6 +435,58 @@
     drawDial(); showLink();
     $("station").hidden = true; $("setup").hidden = false;
   });
+
+  // ---- Keep the screen awake while the station is on ----
+  var wake = null;
+  function requestWake() {
+    if (!("wakeLock" in navigator) || wake) return;
+    navigator.wakeLock.request("screen").then(function (w) {
+      wake = w; w.addEventListener("release", function () { wake = null; });
+    }).catch(function () {});
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && !$("station").hidden) requestWake();
+  });
+  $("load").addEventListener("click", requestWake);
+
+  // ---- Dock mode: black screen + touch lock, hold 2 seconds to unlock ----
+  var holdTimer = null, HOLD_MS = 2000;
+  function dockText() {
+    $("dockSong").textContent = $("title").textContent;
+    $("dockArtist").textContent = $("artist").textContent;
+  }
+  $("dock").addEventListener("click", function () {
+    requestWake(); dockText();
+    document.body.classList.add("dock");
+    $("shield").hidden = false;
+    window.scrollTo(0, 0);
+  });
+  function exitDock() {
+    cancelHold();
+    document.body.classList.remove("dock");
+    $("shield").hidden = true;
+  }
+  function startHold(e) {
+    if (e) e.preventDefault();
+    cancelHold();
+    $("dockHint").textContent = "Keep holding…"; $("dockHint").className = "dh holding";
+    holdTimer = setTimeout(exitDock, HOLD_MS);
+  }
+  function cancelHold() {
+    clearTimeout(holdTimer); holdTimer = null;
+    $("dockHint").textContent = "Locked · press and hold 2 seconds to unlock"; $("dockHint").className = "dh";
+  }
+  var sh = $("shield");
+  sh.addEventListener("touchstart", startHold, { passive: false });
+  sh.addEventListener("touchend", cancelHold);
+  sh.addEventListener("touchcancel", cancelHold);
+  sh.addEventListener("touchmove", function (e) { e.preventDefault(); }, { passive: false });
+  sh.addEventListener("mousedown", startHold);
+  sh.addEventListener("mouseup", cancelHold);
+  sh.addEventListener("mouseleave", cancelHold);
+  sh.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  // keep the dim song text current while docked
+  setInterval(function () { if (document.body.classList.contains("dock")) dockText(); }, 2000);
 })();
 </script>
 </body>
