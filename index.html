@@ -71,7 +71,7 @@
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V2.0 · DJ TEST</span>
+    <span class="freq">V2.1 · DJ TEST</span>
   </header>
 
   <section class="panel" id="setup">
@@ -181,8 +181,27 @@
     u.onend = done; u.onerror = done;
     // Backup in case the phone never reports the voice finished
     resumeTimer = setTimeout(done, Math.min(20000, 2500 + text.split(" ").length * 450));
+    window._djUtterance = u; // iPhone can lose the "finished" signal if this isn't kept
     synth.speak(u);
   }
+
+  // ---- Stuck-video watchdog: nudge after 10s, skip after 25s ----
+  var stuckSince = 0, nudged = false;
+  setInterval(function () {
+    if (!player || !player.getPlayerState || talking) { stuckSince = 0; return; }
+    var s = player.getPlayerState();
+    var waiting = (s === YT.PlayerState.BUFFERING || s === -1);
+    if (!waiting) { stuckSince = 0; nudged = false; return; }
+    if (!stuckSince) { stuckSince = Date.now(); return; }
+    var secs = Math.round((Date.now() - stuckSince) / 1000);
+    $("status").textContent = "Loading next song… " + secs + "s";
+    if (secs >= 10 && !nudged) { nudged = true; player.playVideo(); }
+    if (secs >= 25) {
+      stuckSince = 0; nudged = false;
+      $("status").textContent = "Song wouldn't load, skipping";
+      player.nextVideo();
+    }
+  }, 1000);
 
   $("dj").addEventListener("click", function () {
     djOn = !djOn;
@@ -259,7 +278,7 @@
                               s === YT.PlayerState.PAUSED ? "Paused" :
                               s === YT.PlayerState.BUFFERING ? "Tuning in" : "Standing by";
     $("toggle").textContent = s === YT.PlayerState.PLAYING ? "Pause" : "Play";
-    if (s === YT.PlayerState.PLAYING || s === YT.PlayerState.BUFFERING) showSong();
+    if (s === YT.PlayerState.PLAYING) showSong();
   }
 
   function showSong() {
