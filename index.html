@@ -71,7 +71,7 @@
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V1.1 · PLAYER TEST</span>
+    <span class="freq">V1.2 · PLAYER TEST</span>
   </header>
 
   <section class="panel" id="setup">
@@ -142,7 +142,7 @@
   function startPlayer(listId) {
     if (player) { player.loadPlaylist({ list: listId, listType: "playlist", index: 0 }); return; }
     player = new YT.Player("player", {
-      playerVars: { listType: "playlist", list: listId, playsinline: 1, autoplay: 1, rel: 0 },
+      playerVars: { listType: "playlist", list: listId, playsinline: 1, autoplay: 1, rel: 0, origin: location.origin },
       events: {
         onReady: function (e) { e.target.playVideo(); },
         onStateChange: onState,
