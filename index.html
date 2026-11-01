@@ -71,7 +71,7 @@
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V1.3 · PLAYER TEST</span>
+    <span class="freq">V2.0 · DJ TEST</span>
   </header>
 
   <section class="panel" id="setup">
@@ -95,7 +95,10 @@
       <button id="toggle">Pause</button>
       <button class="ghost" id="next">Skip</button>
     </div>
-    <button class="ghost" id="change">Change playlist</button>
+    <div class="row">
+      <button class="ghost" id="dj" aria-pressed="true">DJ: On</button>
+      <button class="ghost" id="change">Change playlist</button>
+    </div>
   </section>
 
   <section class="panel" id="logBox" hidden>
@@ -108,6 +111,85 @@
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var player = null, apiReady = false, pendingList = null, lastId = null, errRun = 0;
+  var djOn = true, talking = false, introCount = 0, resumeTimer = null, voice = null;
+  var synth = window.speechSynthesis || null;
+
+  // ---- DJ voice (iPhone's built-in speech) ----
+  function pickVoice() {
+    if (!synth) return;
+    var vs = synth.getVoices().filter(function (v) { return /^en(-|_)US/i.test(v.lang); });
+    voice = vs.filter(function (v) { return /premium|enhanced/i.test(v.name); })[0] || vs[0] || null;
+  }
+  if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
+
+  // iPhone only allows speech after a tap; speak a silent line on Start to unlock it
+  function unlockSpeech() {
+    if (!synth) return;
+    var u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u);
+  }
+
+  // Turn "Artist - Song (Official Video)" into clean song and artist names
+  function cleanNames(title, author) {
+    var t = String(title || "");
+    t = t.replace(/\s*[\(\[][^\)\]]*(official|video|audio|lyric|visuali[sz]er|\bhd\b|4k|remaster|explicit|\bmv\b)[^\)\]]*[\)\]]/gi, "");
+    t = t.replace(/\s*\|.*$/, "").trim();
+    var a = String(author || "").replace(/ - Topic$/, "").replace(/vevo$/i, "").replace(/\s*official$/i, "").trim();
+    var parts = t.split(/\s+[-–—]\s+/);
+    if (parts.length >= 2) { a = parts[0].trim(); t = parts.slice(1).join(" - ").trim(); }
+    t = t.replace(/["“”]/g, "").replace(/\s+/g, " ").trim();
+    return { song: t || "this one", artist: a };
+  }
+
+  function introLine(song, artist) {
+    var by = artist ? " by " + artist : "";
+    if (introCount === 0) return "You're listening to Dockside Radio. Let's kick things off with " + song + by + ".";
+    var lines = artist ? [
+      "Next up, " + song + " by " + artist + ".",
+      "Here's " + artist + " with " + song + ".",
+      "Coming up on Dockside Radio, " + song + ", from " + artist + ".",
+      "Keeping it rolling. This is " + artist + ", " + song + "."
+    ] : [
+      "Next up, " + song + ".",
+      "Coming up on Dockside Radio, " + song + "."
+    ];
+    return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  function stopTalking() {
+    clearTimeout(resumeTimer);
+    if (synth) synth.cancel();
+    talking = false;
+  }
+
+  function djIntro(song, artist) {
+    if (!djOn || !synth) return;
+    stopTalking();
+    var text = introLine(song, artist);
+    introCount++;
+    talking = true;
+    player.pauseVideo();
+    $("status").textContent = "DJ on the mic";
+    document.body.classList.add("playing");
+    var u = new SpeechSynthesisUtterance(text);
+    if (voice) u.voice = voice;
+    u.rate = 1.0;
+    var done = function () {
+      if (!talking) return;
+      stopTalking();
+      player.playVideo();
+    };
+    u.onend = done; u.onerror = done;
+    // Backup in case the phone never reports the voice finished
+    resumeTimer = setTimeout(done, Math.min(20000, 2500 + text.split(" ").length * 450));
+    synth.speak(u);
+  }
+
+  $("dj").addEventListener("click", function () {
+    djOn = !djOn;
+    this.textContent = djOn ? "DJ: On" : "DJ: Off";
+    this.setAttribute("aria-pressed", String(djOn));
+    if (!djOn && talking) { stopTalking(); player.playVideo(); }
+  });
 
   // Remember the last playlist link on this phone
   try { var saved = localStorage.getItem("dj-playlist"); if (saved) $("link").value = saved; } catch (e) {}
@@ -136,6 +218,7 @@
     var id = playlistId($("link").value);
     if (!id) { setMsg("That doesn't look like a playlist link. It should contain list= in it.", true); return; }
     try { localStorage.setItem("dj-playlist", $("link").value.trim()); } catch (e) {}
+    unlockSpeech(); introCount = 0;
     $("setup").hidden = true; $("station").hidden = false;
     if (apiReady) startPlayer(id); else pendingList = id;
   });
@@ -143,6 +226,7 @@
   // Diagnostic: YouTube's own developer sample video, which allows embedding
   var SAMPLE = "M7lc1UVf-VE";
   $("sample").addEventListener("click", function () {
+    unlockSpeech(); introCount = 0;
     $("setup").hidden = true; $("station").hidden = false;
     if (apiReady) startPlayer(null, SAMPLE); else pendingList = "video:" + SAMPLE;
   });
@@ -169,6 +253,7 @@
 
   function onState(e) {
     var s = e.data;
+    if (talking) { $("toggle").textContent = "Pause"; return; }
     document.body.classList.toggle("playing", s === YT.PlayerState.PLAYING);
     $("status").textContent = s === YT.PlayerState.PLAYING ? "On air" :
                               s === YT.PlayerState.PAUSED ? "Paused" :
@@ -181,13 +266,14 @@
     var d = player.getVideoData ? player.getVideoData() : null;
     if (!d || !d.video_id || d.video_id === lastId) return;
     lastId = d.video_id; errRun = 0;
-    var artist = (d.author || "").replace(/ - Topic$/, "");
-    $("title").textContent = d.title || "Unknown song";
+    var n = cleanNames(d.title, d.author), artist = n.artist;
+    $("title").textContent = n.song;
     $("artist").textContent = artist;
+    djIntro(n.song, artist);
     var list = player.getPlaylist() || [], i = player.getPlaylistIndex();
     $("count").textContent = list.length ? "Song " + (i + 1) + " of " + list.length : "";
     var li = document.createElement("li");
-    li.textContent = (d.title || "Unknown song") + " ";
+    li.textContent = n.song + " ";
     var sp = document.createElement("span"); sp.textContent = artist; li.appendChild(sp);
     $("log").appendChild(li); $("logBox").hidden = false;
   }
@@ -208,11 +294,13 @@
 
   $("toggle").addEventListener("click", function () {
     if (!player) return;
+    if (talking) { stopTalking(); player.pauseVideo(); $("status").textContent = "Paused"; $("toggle").textContent = "Play"; document.body.classList.remove("playing"); return; }
     if (player.getPlayerState() === YT.PlayerState.PLAYING) player.pauseVideo(); else player.playVideo();
   });
-  $("next").addEventListener("click", function () { if (player) player.nextVideo(); });
-  $("prev").addEventListener("click", function () { if (player) player.previousVideo(); });
+  $("next").addEventListener("click", function () { if (player) { stopTalking(); player.nextVideo(); } });
+  $("prev").addEventListener("click", function () { if (player) { stopTalking(); player.previousVideo(); } });
   $("change").addEventListener("click", function () {
+    stopTalking();
     if (player) player.pauseVideo();
     $("station").hidden = true; $("setup").hidden = false;
   });
