@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
-  /* Layout: one column, a radio "dial" card for now-playing, controls below, log at bottom */
+  /* Layout: one column. Station dial (tiles) → playlist link → now-playing card → controls → log */
   :root {
     --bg: #0d1517;
     --panel: #142226;
@@ -35,7 +35,7 @@
   h1 { font: 700 1.6rem/1.1 var(--display); letter-spacing: .02em; margin: 0; text-transform: uppercase; }
   .freq { font: 500 .85rem var(--display); color: var(--accent); letter-spacing: .12em; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
-  label { font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  label, .label { font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
   input {
     width: 100%; font: 16px var(--body); color: var(--fg); background: var(--bg);
     border: 1px solid var(--line); border-radius: 10px; padding: 12px;
@@ -52,43 +52,63 @@
   .row > * { flex: 1; }
   .msg { font-size: .9rem; color: var(--muted); margin: 0; min-height: 1.4em; }
   .msg.err { color: #ff8a7a; }
+
+  /* Station dial */
+  .dial { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .st {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; text-align: left; text-transform: none; letter-spacing: 0; display: grid; gap: 2px; min-height: 72px;
+  }
+  .st b { font: 700 1.05rem/1.15 var(--display); letter-spacing: .03em; text-transform: uppercase; }
+  .st span { font: 400 .85rem var(--body); color: var(--muted); }
+  .st i { font: 500 .72rem var(--display); letter-spacing: .1em; text-transform: uppercase; font-style: normal; color: var(--muted); }
+  .st.ready i { color: var(--live); }
+  .st[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .st[aria-pressed="true"] b { color: var(--accent); }
+
   .onair { display: flex; align-items: center; gap: 8px; font: 700 .8rem var(--display); letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
   .playing .dot { background: var(--live); box-shadow: 0 0 10px var(--live); }
   .playing .onair { color: var(--live); }
+  .stationline { font: 700 .8rem var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0; }
   .title { font: 700 1.35rem/1.2 var(--display); margin: 0; overflow-wrap: anywhere; }
   .artist { color: var(--muted); margin: 0; overflow-wrap: anywhere; }
-  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .85rem; }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .85rem; margin: 0; }
+  .said { margin: 0; font-size: .92rem; color: var(--fg); border-left: 2px solid var(--accent); padding-left: 10px; font-style: italic; overflow-wrap: anywhere; }
   .video { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: #000; }
   .video > div, .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
   ol { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; font-size: .92rem; }
   ol li { overflow-wrap: anywhere; }
   ol li span { color: var(--muted); }
   h2 { font: 700 .85rem var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V2.1 · DJ TEST</span>
+    <span class="freq">V3.0 · AI DJ</span>
   </header>
 
   <section class="panel" id="setup">
-    <label for="link">YouTube Music playlist link</label>
+    <span class="label">Pick a station</span>
+    <div class="dial" id="dial"></div>
+    <label for="link" id="linkLabel">Playlist link</label>
     <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://music.youtube.com/playlist?list=...">
     <button id="load">Start the station</button>
-    <button class="ghost" id="sample">Test with YouTube's sample video</button>
-    <p class="msg" id="setupMsg">Paste a playlist set to Unlisted or Public, then tap Start.</p>
+    <p class="msg" id="setupMsg">Use a Public playlist made from music Videos. Each station remembers its own link on this phone.</p>
   </section>
 
   <section class="panel" id="station" hidden>
+    <p class="stationline" id="stationLine"></p>
     <div class="onair"><span class="dot"></span><span id="status">Tuning in</span></div>
     <div>
       <p class="title" id="title">Loading…</p>
       <p class="artist" id="artist"></p>
       <p class="count" id="count"></p>
     </div>
+    <p class="said" id="said" hidden></p>
     <div class="video"><div id="player"></div></div>
     <div class="row">
       <button class="ghost" id="prev">Back</button>
@@ -97,7 +117,7 @@
     </div>
     <div class="row">
       <button class="ghost" id="dj" aria-pressed="true">DJ: On</button>
-      <button class="ghost" id="change">Change playlist</button>
+      <button class="ghost" id="change">Stations</button>
     </div>
   </section>
 
@@ -110,19 +130,75 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+
+  // ---- Stations and hosts (personalities live in the Supabase function) ----
+  var STATIONS = [
+    { id: "classic", name: "Classic Rock", host: "Big Mike", voices: ["Aaron", "Evan", "Nathan", "Tom", "Fred"], lang: /^en.US/i, rate: 0.95, pitch: 0.85 },
+    { id: "alt",     name: "Alternative",  host: "Jess",     voices: ["Nicky", "Zoe", "Ava", "Allison", "Samantha"], lang: /^en.US/i, rate: 1.0,  pitch: 1.0 },
+    { id: "country", name: "Country",      host: "Dusty",    voices: ["Fred", "Tom", "Evan", "Aaron"], lang: /^en.US/i, rate: 0.9,  pitch: 0.95 },
+    { id: "rap",     name: "Rap",          host: "Static",   voices: ["Nathan", "Evan", "Aaron", "Tom"], lang: /^en.US/i, rate: 1.12, pitch: 1.0 },
+    { id: "dance",   name: "Dance",        host: "Nova",     voices: ["Martha", "Kate", "Serena", "Stephanie"], lang: /^en.GB/i, rate: 1.08, pitch: 1.1 },
+    { id: "jazz",    name: "Jazz",         host: "Theo",     voices: ["Arthur", "Daniel", "Oliver", "Malcolm"], lang: /^en.GB/i, rate: 0.88, pitch: 0.9 }
+  ];
+  var FN_URL = "https://euxcisnyansdrzzjyvsl.supabase.co/functions/v1/dj-intro";
+  var ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1eGNpc255YW5zZHJ6emp5dnNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NzMwNTAsImV4cCI6MjEwNzA0OTA1MH0.8WmYz2K_k78lImy_DvH7S041JtByzeOoESqrS64o2i0";
+
   var player = null, apiReady = false, pendingList = null, lastId = null, errRun = 0;
-  var djOn = true, talking = false, introCount = 0, resumeTimer = null, voice = null;
+  var djOn = true, talking = false, introCount = 0, resumeTimer = null, introToken = 0;
+  var prev = null; // last song { song, artist }
   var synth = window.speechSynthesis || null;
+  var links = {}, current = STATIONS[0];
 
-  // ---- DJ voice (iPhone's built-in speech) ----
-  function pickVoice() {
-    if (!synth) return;
-    var vs = synth.getVoices().filter(function (v) { return /^en(-|_)US/i.test(v.lang); });
-    voice = vs.filter(function (v) { return /premium|enhanced/i.test(v.name); })[0] || vs[0] || null;
+  // ---- Saved station links (this phone only) ----
+  function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function save(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
+  try { links = JSON.parse(load("dj-stations") || "{}") || {}; } catch (e) { links = {}; }
+  var old = load("dj-playlist");
+  if (old && !links.classic) { links.classic = old; save("dj-stations", JSON.stringify(links)); }
+  var lastSt = load("dj-station");
+  STATIONS.forEach(function (s) { if (s.id === lastSt) current = s; });
+
+  function drawDial() {
+    var d = $("dial"); d.textContent = "";
+    STATIONS.forEach(function (s) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "st" + (links[s.id] ? " ready" : "");
+      b.setAttribute("aria-pressed", String(s === current));
+      var t = document.createElement("b"); t.textContent = s.name;
+      var h = document.createElement("span"); h.textContent = "with " + s.host;
+      var r = document.createElement("i"); r.textContent = links[s.id] ? "Playlist saved" : "Needs a playlist";
+      b.appendChild(t); b.appendChild(h); b.appendChild(r);
+      b.addEventListener("click", function () { saveLink(); current = s; save("dj-station", s.id); drawDial(); showLink(); });
+      d.appendChild(b);
+    });
   }
-  if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
+  function showLink() {
+    $("linkLabel").textContent = current.name + " playlist link";
+    $("link").value = links[current.id] || "";
+    $("load").textContent = "Start " + current.name;
+    setMsg("Use a Public playlist made from music Videos. Each station remembers its own link on this phone.");
+  }
+  function saveLink() {
+    var v = $("link").value.trim();
+    if (v) links[current.id] = v; else delete links[current.id];
+    save("dj-stations", JSON.stringify(links));
+  }
+  drawDial(); showLink();
 
-  // iPhone only allows speech after a tap; speak a silent line on Start to unlock it
+  // ---- Voices ----
+  function hostVoice(st) {
+    if (!synth) return null;
+    var all = synth.getVoices();
+    var named = function (n) { return all.filter(function (v) { return v.name.indexOf(n) === 0; }); };
+    var best = function (list) {
+      return list.filter(function (v) { return /premium|enhanced/i.test(v.name); })[0] || list[0] || null;
+    };
+    for (var i = 0; i < st.voices.length; i++) { var v = best(named(st.voices[i])); if (v) return v; }
+    return best(all.filter(function (v) { return st.lang.test(v.lang); })) ||
+           best(all.filter(function (v) { return /^en/i.test(v.lang); }));
+  }
+  if (synth) { synth.getVoices(); synth.onvoiceschanged = function () {}; }
+
   function unlockSpeech() {
     if (!synth) return;
     var u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u);
@@ -140,50 +216,86 @@
     return { song: t || "this one", artist: a };
   }
 
-  function introLine(song, artist) {
+  // Backup lines if the AI can't be reached
+  function backupLine(song, artist) {
     var by = artist ? " by " + artist : "";
-    if (introCount === 0) return "You're listening to Dockside Radio. Let's kick things off with " + song + by + ".";
+    if (introCount === 0) return "This is " + current.host + " on Dockside Radio " + current.name + ". Let's kick things off with " + song + by + ".";
     var lines = artist ? [
-      "Next up, " + song + " by " + artist + ".",
       "Here's " + artist + " with " + song + ".",
-      "Coming up on Dockside Radio, " + song + ", from " + artist + ".",
+      "Coming up on " + current.name + ", " + song + ", from " + artist + ".",
       "Keeping it rolling. This is " + artist + ", " + song + "."
-    ] : [
-      "Next up, " + song + ".",
-      "Coming up on Dockside Radio, " + song + "."
-    ];
+    ] : ["Coming up on " + current.name + ", " + song + "."];
     return lines[Math.floor(Math.random() * lines.length)];
+  }
+
+  function whenNow() {
+    var d = new Date(), h = d.getHours();
+    var part = h < 5 ? "late night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night";
+    return ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()] + " " + part;
+  }
+
+  // Ask the Supabase function for an AI-written intro; gives up after 8 seconds
+  function fetchIntro(song, artist, first, before) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, 8000);
+      fetch(FN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + ANON, "apikey": ANON },
+        body: JSON.stringify({
+          station: current.id, song: song, artist: artist, first: first, when: whenNow(),
+          prevSong: before ? before.song : "", prevArtist: before ? before.artist : ""
+        })
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (!done) { done = true; clearTimeout(timer); resolve(j && j.text ? j.text : null); } })
+        .catch(function () { if (!done) { done = true; clearTimeout(timer); resolve(null); } });
+    });
   }
 
   function stopTalking() {
     clearTimeout(resumeTimer);
+    introToken++;
     if (synth) synth.cancel();
     talking = false;
   }
 
   function djIntro(song, artist) {
+    var before = prev; prev = { song: song, artist: artist };
     if (!djOn || !synth) return;
     stopTalking();
-    var text = introLine(song, artist);
-    introCount++;
+    var token = ++introToken, first = introCount === 0;
     talking = true;
     player.pauseVideo();
-    $("status").textContent = "DJ on the mic";
+    $("status").textContent = current.host + " is cueing it up";
     document.body.classList.add("playing");
-    var u = new SpeechSynthesisUtterance(text);
-    if (voice) u.voice = voice;
-    u.rate = 1.0;
-    var done = function () {
-      if (!talking) return;
-      stopTalking();
-      player.playVideo();
-    };
-    u.onend = done; u.onerror = done;
-    // Backup in case the phone never reports the voice finished
-    resumeTimer = setTimeout(done, Math.min(20000, 2500 + text.split(" ").length * 450));
-    window._djUtterance = u; // iPhone can lose the "finished" signal if this isn't kept
-    synth.speak(u);
+    fetchIntro(song, artist, first, before).then(function (text) {
+      if (token !== introToken || !talking) return; // skipped or paused meanwhile
+      var ai = !!text;
+      if (!text) text = backupLine(song, artist);
+      introCount++;
+      $("said").textContent = current.host + ": " + text; $("said").hidden = false;
+      $("status").textContent = current.host + " on the mic" + (ai ? "" : " (backup line)");
+      var u = new SpeechSynthesisUtterance(text);
+      var v = hostVoice(current); if (v) u.voice = v;
+      u.rate = current.rate; u.pitch = current.pitch;
+      var fin = function () {
+        if (token !== introToken || !talking) return;
+        stopTalking();
+        player.playVideo();
+      };
+      u.onend = fin; u.onerror = fin;
+      resumeTimer = setTimeout(fin, Math.min(25000, 3000 + text.split(" ").length * 480));
+      window._djUtterance = u; // iPhone can lose the "finished" signal if this isn't kept
+      synth.speak(u);
+    });
   }
+
+  $("dj").addEventListener("click", function () {
+    djOn = !djOn;
+    this.textContent = djOn ? "DJ: On" : "DJ: Off";
+    this.setAttribute("aria-pressed", String(djOn));
+    if (!djOn && talking) { stopTalking(); player.playVideo(); }
+  });
 
   // ---- Stuck-video watchdog: nudge after 10s, skip after 25s ----
   var stuckSince = 0, nudged = false;
@@ -203,16 +315,7 @@
     }
   }, 1000);
 
-  $("dj").addEventListener("click", function () {
-    djOn = !djOn;
-    this.textContent = djOn ? "DJ: On" : "DJ: Off";
-    this.setAttribute("aria-pressed", String(djOn));
-    if (!djOn && talking) { stopTalking(); player.playVideo(); }
-  });
-
-  // Remember the last playlist link on this phone
-  try { var saved = localStorage.getItem("dj-playlist"); if (saved) $("link").value = saved; } catch (e) {}
-
+  // ---- Player ----
   function playlistId(text) {
     var m = String(text).match(/[?&]list=([A-Za-z0-9_-]+)/);
     if (m) return m[1];
@@ -222,7 +325,6 @@
 
   function setMsg(t, err) { $("setupMsg").textContent = t; $("setupMsg").className = err ? "msg err" : "msg"; }
 
-  // Load YouTube's official player script
   var tag = document.createElement("script");
   tag.src = "https://www.youtube.com/iframe_api";
   tag.onerror = function () { setMsg("Couldn't reach YouTube. Check your connection and reload.", true); };
@@ -236,32 +338,19 @@
   $("load").addEventListener("click", function () {
     var id = playlistId($("link").value);
     if (!id) { setMsg("That doesn't look like a playlist link. It should contain list= in it.", true); return; }
-    try { localStorage.setItem("dj-playlist", $("link").value.trim()); } catch (e) {}
-    unlockSpeech(); introCount = 0;
+    saveLink(); drawDial();
+    unlockSpeech(); introCount = 0; prev = null; lastId = null;
+    $("stationLine").textContent = current.name + " · with " + current.host;
+    $("said").hidden = true;
+    $("log").textContent = ""; $("logBox").hidden = true;
     $("setup").hidden = true; $("station").hidden = false;
     if (apiReady) startPlayer(id); else pendingList = id;
   });
 
-  // Diagnostic: YouTube's own developer sample video, which allows embedding
-  var SAMPLE = "M7lc1UVf-VE";
-  $("sample").addEventListener("click", function () {
-    unlockSpeech(); introCount = 0;
-    $("setup").hidden = true; $("station").hidden = false;
-    if (apiReady) startPlayer(null, SAMPLE); else pendingList = "video:" + SAMPLE;
-  });
-
-  function startPlayer(listId, videoId) {
-    if (listId && listId.indexOf("video:") === 0) { videoId = listId.slice(6); listId = null; }
-    if (player) {
-      if (videoId) player.loadVideoById(videoId);
-      else player.loadPlaylist({ list: listId, listType: "playlist", index: 0 });
-      return;
-    }
-    var vars = { playsinline: 1, autoplay: 1, rel: 0, origin: location.origin };
-    if (!videoId) { vars.listType = "playlist"; vars.list = listId; }
+  function startPlayer(listId) {
+    if (player) { player.loadPlaylist({ list: listId, listType: "playlist", index: 0 }); return; }
     player = new YT.Player("player", {
-      videoId: videoId || undefined,
-      playerVars: vars,
+      playerVars: { listType: "playlist", list: listId, playsinline: 1, autoplay: 1, rel: 0, origin: location.origin },
       events: {
         onReady: function (e) { e.target.playVideo(); },
         onStateChange: onState,
@@ -285,20 +374,19 @@
     var d = player.getVideoData ? player.getVideoData() : null;
     if (!d || !d.video_id || d.video_id === lastId) return;
     lastId = d.video_id; errRun = 0;
-    var n = cleanNames(d.title, d.author), artist = n.artist;
+    var n = cleanNames(d.title, d.author);
     $("title").textContent = n.song;
-    $("artist").textContent = artist;
-    djIntro(n.song, artist);
+    $("artist").textContent = n.artist;
     var list = player.getPlaylist() || [], i = player.getPlaylistIndex();
     $("count").textContent = list.length ? "Song " + (i + 1) + " of " + list.length : "";
     var li = document.createElement("li");
     li.textContent = n.song + " ";
-    var sp = document.createElement("span"); sp.textContent = artist; li.appendChild(sp);
+    var sp = document.createElement("span"); sp.textContent = n.artist; li.appendChild(sp);
     $("log").appendChild(li); $("logBox").hidden = false;
+    djIntro(n.song, n.artist);
   }
 
   function onErr(e) {
-    // 101/150: owner blocks playback outside YouTube; skip it
     // 100: private or removed. 101/150: owner blocks playback outside YouTube.
     errRun++;
     var why = e.data === 100 ? "private or removed" :
@@ -321,6 +409,7 @@
   $("change").addEventListener("click", function () {
     stopTalking();
     if (player) player.pauseVideo();
+    drawDial(); showLink();
     $("station").hidden = true; $("setup").hidden = false;
   });
 })();
