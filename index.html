@@ -71,13 +71,14 @@
 <main>
   <header>
     <h1>Dockside Radio</h1>
-    <span class="freq">V1.2 · PLAYER TEST</span>
+    <span class="freq">V1.3 · PLAYER TEST</span>
   </header>
 
   <section class="panel" id="setup">
     <label for="link">YouTube Music playlist link</label>
     <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://music.youtube.com/playlist?list=...">
     <button id="load">Start the station</button>
+    <button class="ghost" id="sample">Test with YouTube's sample video</button>
     <p class="msg" id="setupMsg">Paste a playlist set to Unlisted or Public, then tap Start.</p>
   </section>
 
@@ -139,10 +140,25 @@
     if (apiReady) startPlayer(id); else pendingList = id;
   });
 
-  function startPlayer(listId) {
-    if (player) { player.loadPlaylist({ list: listId, listType: "playlist", index: 0 }); return; }
+  // Diagnostic: YouTube's own developer sample video, which allows embedding
+  var SAMPLE = "M7lc1UVf-VE";
+  $("sample").addEventListener("click", function () {
+    $("setup").hidden = true; $("station").hidden = false;
+    if (apiReady) startPlayer(null, SAMPLE); else pendingList = "video:" + SAMPLE;
+  });
+
+  function startPlayer(listId, videoId) {
+    if (listId && listId.indexOf("video:") === 0) { videoId = listId.slice(6); listId = null; }
+    if (player) {
+      if (videoId) player.loadVideoById(videoId);
+      else player.loadPlaylist({ list: listId, listType: "playlist", index: 0 });
+      return;
+    }
+    var vars = { playsinline: 1, autoplay: 1, rel: 0, origin: location.origin };
+    if (!videoId) { vars.listType = "playlist"; vars.list = listId; }
     player = new YT.Player("player", {
-      playerVars: { listType: "playlist", list: listId, playsinline: 1, autoplay: 1, rel: 0, origin: location.origin },
+      videoId: videoId || undefined,
+      playerVars: vars,
       events: {
         onReady: function (e) { e.target.playVideo(); },
         onStateChange: onState,
