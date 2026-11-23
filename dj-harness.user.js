@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Dockside Radio DJ (harness test 1)
 // @description  Runs inside YouTube Music in Safari. When a new song starts, pauses it, announces it with the iPhone voice, then plays it.
-// @version      0.1
+// @version      0.2
+// @updateURL    https://rich9267-stack.github.io/dockside-radio/dj-harness.user.js
+// @downloadURL  https://rich9267-stack.github.io/dockside-radio/dj-harness.user.js
 // @match        https://music.youtube.com/*
 // @run-at       document-end
 // @noframes
@@ -32,9 +34,19 @@
   btn.addEventListener("click", function () {
     on = !on;
     if (on) {
-      if (synth) { var u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
       lastKey = currentKey(); // don't interrupt the song already playing
       label("DJ: ON");
+      // Speak out loud right inside the tap. iPhone only "unlocks" the voice this way,
+      // and it doubles as a test: if you hear this, the voice works on this page.
+      if (synth) {
+        synth.cancel();
+        var u = new SpeechSynthesisUtterance("Dockside Radio DJ is on.");
+        held = u;
+        synth.speak(u);
+        setTimeout(function () { if (on && !synth.speaking && !talking) checkVoice("test"); }, 1500);
+      } else {
+        label("DJ: NO VOICE");
+      }
     } else {
       stop(true);
       label("DJ: OFF");
@@ -63,6 +75,14 @@
     if (resume && was && video()) video().play().catch(function () {});
   }
 
+  // If the phone accepted the speech but never started talking, nudge it and show it on the button
+  var heardOnce = false;
+  function checkVoice(kind) {
+    if (synth.speaking) { heardOnce = true; return; }
+    try { synth.resume(); } catch (e) {}
+    if (!heardOnce) label(kind === "test" ? "DJ: ON (NO VOICE?)" : "DJ: NO VOICE");
+  }
+
   function introduce(n) {
     if (!synth) return;
     var v = video(); if (!v) return;
@@ -76,11 +96,17 @@
     count++;
     label("DJ: TALKING");
     var u = new SpeechSynthesisUtterance(text);
-    var done = function () { if (!talking) return; stop(true); label("DJ: ON"); };
+    var done = function () {
+      if (!talking) return;
+      stop(true);
+      if (btn.textContent !== "DJ: NO VOICE") label("DJ: ON"); // keep the warning visible
+    };
     u.onend = done; u.onerror = done;
     held = u; // keep a reference so iPhone doesn't lose the "finished" signal
     backup = setTimeout(done, 3000 + text.split(" ").length * 450);
+    synth.cancel(); // clear anything stuck in the phone's speech queue
     synth.speak(u);
+    setTimeout(function () { if (talking) checkVoice("intro"); }, 1200);
   }
 
   // ---- Watch for song changes ----
