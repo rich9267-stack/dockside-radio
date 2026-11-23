@@ -1,11 +1,14 @@
 // Dockside Radio — "dj-intro": writes a short spoken song intro in a station host's voice using
 // Google Gemini (free tier). Uses the project's existing GEMINI_API_KEY secret (shared with identify-fish).
-// Only answers requests coming from the Dockside Radio page. Host personalities live here, not in the page.
+// Answers the Dockside Radio page and the Dockside DJ script running inside YouTube Music (Safari + Userscripts).
+// Host personalities live here, not in the page or script.
 
-const ALLOWED_ORIGINS = ["https://rich9267-stack.github.io"];
+const ALLOWED_ORIGINS = ["https://rich9267-stack.github.io", "https://music.youtube.com"];
+// The Userscripts app sends its requests from the Safari extension itself (or with no Origin header).
+const okOrigin = (o: string) => o === "" || ALLOWED_ORIGINS.includes(o) || o.startsWith("safari-web-extension://");
 
 const cors = (origin: string) => ({
-  "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+  "Access-Control-Allow-Origin": okOrigin(origin) && origin ? origin : ALLOWED_ORIGINS[0],
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Vary": "Origin",
@@ -51,7 +54,7 @@ Deno.serve(async (req) => {
 
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(origin) });
   if (req.method !== "POST") return reply({ error: "POST only" }, 405);
-  if (!ALLOWED_ORIGINS.includes(origin)) return reply({ error: "Not allowed from this site." }, 403);
+  if (!okOrigin(origin)) return reply({ error: "Not allowed from this site." }, 403);
 
   try {
     const key = Deno.env.get("GEMINI_API_KEY");
