@@ -37,6 +37,7 @@
     border: 0; border-radius: 10px; padding: 14px 16px; min-height: 48px; cursor: pointer;
     background: var(--accent); color: #1b1206;
   }
+  button.alt { background: transparent; color: var(--fg); border: 1px solid var(--accent); }
   button:disabled { opacity: .4; cursor: default; }
   button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .status { margin: 0; font-size: .95rem; color: var(--muted); }
@@ -56,9 +57,10 @@
   </header>
 
   <section class="panel">
-    <button id="loadBtn">1 · Load Kokoro (about 90 MB, one time)</button>
+    <button id="loadBtn">1 · Load Kokoro, normal mode (about 90 MB)</button>
+    <button id="gpuBtn" class="alt">1 · Or load GPU mode (about 330 MB, may be much faster)</button>
     <div class="bar" aria-hidden="true"><div id="bar"></div></div>
-    <p class="status" id="loadStatus">Use Wi-Fi for the first load. Later visits should load from Safari's saved copy.</p>
+    <p class="status" id="loadStatus">Use Wi-Fi. To compare modes, reload this page between them.</p>
   </section>
 
   <section class="panel">
@@ -119,15 +121,22 @@
     return new Blob([buf], { type: "audio/wav" });
   }
 
-  $("loadBtn").addEventListener("click", async () => {
-    $("loadBtn").disabled = true;
-    setStatus("loadStatus", "Downloading the voice engine…");
+  async function loadKokoro(mode) {
+    const gpu = mode === "gpu";
+    if (gpu && !navigator.gpu) {
+      setStatus("loadStatus", "GPU mode isn't available in this Safari. Use normal mode.", "err");
+      log("GPU mode: not available on this phone/Safari");
+      return;
+    }
+    $("loadBtn").disabled = true; $("gpuBtn").disabled = true;
+    $("bar").style.width = "0";
+    setStatus("loadStatus", "Downloading the voice engine (" + (gpu ? "GPU" : "normal") + " mode)…");
     const t0 = performance.now();
     try {
       const { KokoroTTS } = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js");
       const files = {};
       tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-        dtype: "q8", device: "wasm",
+        dtype: gpu ? "fp32" : "q8", device: gpu ? "webgpu" : "wasm",
         progress_callback: (p) => {
           if (p.status === "progress" && p.file && p.total) {
             files[p.file] = [p.loaded, p.total];
@@ -139,27 +148,33 @@
       });
       $("bar").style.width = "100%";
       const took = performance.now() - t0;
-      setStatus("loadStatus", "Loaded in " + secs(took) + ".", "ok");
-      log("Load time: " + secs(took));
+      setStatus("loadStatus", (gpu ? "GPU" : "Normal") + " mode loaded in " + secs(took) + ".", "ok");
+      log((gpu ? "GPU" : "Normal") + " mode load time: " + secs(took));
       $("speakBtn").disabled = false;
-      setStatus("speakStatus", "Ready. Tap Make it talk. Try it with your Bluetooth speaker connected.");
+      setStatus("speakStatus", "Ready. Tap Make it talk. The first line is often slower than the rest.");
     } catch (e) {
       setStatus("loadStatus", "Couldn't load Kokoro: " + (e && e.message ? e.message : e), "err");
-      log("Load failed: " + (e && e.message ? e.message : e));
-      $("loadBtn").disabled = false;
+      log((gpu ? "GPU" : "Normal") + " mode load failed: " + (e && e.message ? e.message : e));
+      $("loadBtn").disabled = false; $("gpuBtn").disabled = false;
     }
-  });
+  }
+  $("loadBtn").addEventListener("click", () => loadKokoro("cpu"));
+  $("gpuBtn").addEventListener("click", () => loadKokoro("gpu"));
 
+  // Live timer so a slow voice shows how long it's taking
+  let tick = null;
   $("speakBtn").addEventListener("click", async () => {
     if (!tts) return;
     // Unlock the player inside the tap
     out.src = SILENT; out.play().catch(() => {});
     $("speakBtn").disabled = true;
     const voice = $("voice").value, text = $("text").value.trim() || "Testing, one, two.";
-    setStatus("speakStatus", "Making the voice…");
     const t0 = performance.now();
+    setStatus("speakStatus", "Making the voice… 0 s");
+    tick = setInterval(() => setStatus("speakStatus", "Making the voice… " + Math.round((performance.now() - t0) / 1000) + " s"), 1000);
     try {
       const audio = await tts.generate(text, { voice });
+      clearInterval(tick);
       const took = performance.now() - t0;
       const blob = typeof audio.toBlob === "function" ? audio.toBlob() : toWavBlob(audio.audio, audio.sampling_rate);
       const length = audio.audio.length / audio.sampling_rate;
@@ -168,6 +183,7 @@
       setStatus("speakStatus", "Made " + length.toFixed(1) + " s of speech in " + secs(took) + ".", "ok");
       log(voice + ": " + length.toFixed(1) + " s of speech took " + secs(took) + " to make");
     } catch (e) {
+      clearInterval(tick);
       setStatus("speakStatus", "Couldn't make the voice: " + (e && e.message ? e.message : e), "err");
       log("Speak failed (" + voice + "): " + (e && e.message ? e.message : e));
     }
